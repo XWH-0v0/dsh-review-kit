@@ -1,0 +1,43 @@
+{
+  "name": "@local/dsh-review-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Evidence-gated code review for DeepSeek Harness: verbatim anchors, adversarial verification, explicit coverage gaps.",
+  "author": "DeepSeek",
+  "homepage": "https://github.com/XWH-0v0/dsh-review-kit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XWH-0v0/dsh-review-kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/XWH-0v0/dsh-review-kit/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "code-review",
+    "ai-agent",
+    "llm",
+    "static-analysis"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib/**/*.js",
+    "skills/**/*",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "package.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

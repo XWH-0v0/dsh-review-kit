@@ -1,0 +1,4 @@
+- insert:
+    - id: review-kit
+      name: '@local/dsh-review-kit'
+      config: {}
