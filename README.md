@@ -127,7 +127,8 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 | `maxCandidatesPerLens` | `8` | Truncation only, not a failure |
 | `maxChildren` | `24` | Estimate = lenses + findings × verifiers |
 | `maxConcurrentChildren` | `6` | Shared limiter |
-| `childTimeoutMs` | `300000` | Per finder/verifier child |
+| `childTimeoutMs` | `600000` | Per finder/verifier child |
+| `softTimeoutMs` | `1500000` | Whole review; on expiry children are cancelled and a partial report is returned |
 | `onVerifierFailure` | `refute` | `refute` (fail closed) or `observation` |
 | `childMaxDepth` | `1` | `1` = children exist but cannot delegate further |
 | `maxFiles` | `40` | Changed files read per review |
@@ -169,7 +170,8 @@ lib/skill.js        on-demand skill provider (rank 550)
 ### Tests
 
 ```bash
-# 45 unit tests (pure modules + a real temporary git repository)
+# 58 unit tests (pure modules, a real temporary git repository, and the
+# activation-spec contract test in test/unit/subagents.test.mjs)
 node --test test/unit/*.test.mjs
 
 # scripted end-to-end: real snapshot/gate/dedupe/verify/render path, fake children
@@ -189,14 +191,23 @@ The e2e harness runs the fixture project at `test/fixtures/buggy-project`
 
 The plugin follows the installed Harness runtime rather than older plugin sources:
 
-1. **Subagent API** — `ctx.subagents.startActivation({ provider, label, request,
-   signal, delivery: 'caller' })`, awaiting `activation.result` and disposing on
-   timeout. `delivery: 'caller'` keeps one completion notice per child out of the
-   parent conversation.
-2. **`maxDepth` semantics** — a request's `maxDepth` is the absolute delegation depth
+1. **Subagent API** — `ctx.subagents.startActivation({ provider, label, prompt,
+   parent, cwd, outputSchema, maxDepth, signal, delivery: 'caller' })`. The spec is
+   flat (`SubagentActivationSpec`, no `request` wrapper): `startActivation` reads
+   `parent`, `prompt`, `outputSchema` and `maxDepth` from the top level. Wrapper-shaped
+   arguments make it read `spec.parent.id` on `undefined` and throw before any child
+   starts, while `outputSchema`/`maxDepth` are silently dropped. The plugin awaits
+   `activation.result` and disposes on timeout; `delivery: 'caller'` keeps one
+   completion notice per child out of the parent conversation.
+2. **`maxDepth` semantics** — the spec's `maxDepth` is the absolute delegation depth
    cap for the child, so `0` refuses to create the child at all. The default is `1`.
 3. **Schema dialect** — `parameters` and `output.schema` use ordinary JSON Schema
    with `required: [...]` arrays; subagent `outputSchema` is standard JSON Schema too.
+4. **Timeouts** — two levels. `childTimeoutMs` bounds one finder/verifier;
+   `softTimeoutMs` bounds the whole review. When the review clock expires the same
+   signal cancels in-flight children, queued children never start, and the tool
+   returns a partial report with a coverage note. The tool's hard `timeoutMs`
+   (60 min) is only a backstop.
 
 ### Not included yet
 
@@ -304,7 +315,8 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 | `maxCandidatesPerLens` | `8` | 只做截断,不算失败 |
 | `maxChildren` | `24` | 估算 = 视角数 + 发现数 × 复核数 |
 | `maxConcurrentChildren` | `6` | 共享并发上限 |
-| `childTimeoutMs` | `300000` | 单个 finder/verifier |
+| `childTimeoutMs` | `600000` | 单个 finder/verifier |
+| `softTimeoutMs` | `1500000` | 整轮评审;到期取消子代理并返回部分结果 |
 | `onVerifierFailure` | `refute` | `refute`(宁漏不错)或 `observation` |
 | `childMaxDepth` | `1` | `1` = 子代理存在,但不能继续委派 |
 | `maxFiles` | `40` | 单次读取的改动文件上限 |
@@ -344,7 +356,7 @@ lib/skill.js        按需加载的技能 provider(rank 550)
 ### 测试
 
 ```bash
-# 45 个单测(纯模块 + 真实临时 git 仓库)
+# 58 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约)
 node --test test/unit/*.test.mjs
 
 # 脚本化端到端:真实 snapshot/gate/dedupe/verify/render 链路,子代理用脚本替代
@@ -363,13 +375,20 @@ node test/e2e/run.mjs
 
 实现跟的是当前安装的 Harness,而不是旧插件源码:
 
-1. **子代理 API** —— `ctx.subagents.startActivation({ provider, label, request,
-   signal, delivery: 'caller' })`,等待 `activation.result`,超时即 dispose。
-   `delivery: 'caller'` 避免每个子代理的完成通知都灌进父会话。
-2. **`maxDepth` 语义** —— 请求里的 `maxDepth` 是子代理的绝对深度上限,传 `0` 会直接
+1. **子代理 API** —— `ctx.subagents.startActivation({ provider, label, prompt,
+   parent, cwd, outputSchema, maxDepth, signal, delivery: 'caller' })`。spec 是扁平的
+   (`SubagentActivationSpec`,没有 `request` 包装):`startActivation` 从顶层读
+   `parent`、`prompt`、`outputSchema`、`maxDepth`。按旧包装传参时,它会在
+   `spec.parent.id` 上抛 `Cannot read properties of undefined` 并在任何子代理启动前
+   失败,同时静默丢弃 `outputSchema` 与 `maxDepth`。插件等待 `activation.result`,
+   超时即 dispose;`delivery: 'caller'` 避免每个子代理的完成通知都灌进父会话。
+2. **`maxDepth` 语义** —— spec 里的 `maxDepth` 是子代理的绝对深度上限,传 `0` 会直接
    拒绝创建子代理,所以默认 `1`。
 3. **schema 方言** —— `parameters` 与 `output.schema` 用标准 JSON Schema 的
    `required` 数组;子代理 `outputSchema` 同样是标准 JSON Schema。
+4. **超时** —— 两层:`childTimeoutMs` 管单个子代理,`softTimeoutMs` 管整轮。
+   整轮时钟到期时,同一个 signal 会取消进行中的子代理、拦住未开始的任务,工具返回
+   带覆盖说明的部分结果;工具层的硬超时(`timeoutMs`,60 分钟)只是兜底。
 
 ### 暂未包含
 

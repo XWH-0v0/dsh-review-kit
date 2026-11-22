@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { createReviewClock } from '../../lib/clock.js'
 import { resolveConfig } from '../../lib/config.js'
 import { runReview } from '../../lib/orchestrator.js'
 import { OUTPUT_SCHEMA } from '../../lib/schema.js'
@@ -185,6 +186,57 @@ await withFixture(async (cwd) => {
   assert.equal(result.coverage.aborted, true)
   assert.deepEqual(validateSchema(OUTPUT_SCHEMA, result), [])
   console.log('  aborted run returns a partial, schema-valid result')
+})
+
+await withFixture(async (cwd) => {
+  const clock = createReviewClock(new AbortController().signal, 1_000)
+  // The clock timer is unref'd (like the per-child budget), so a short-lived
+  // process needs its own keep-alive until the deadline fires.
+  const keepAlive = setInterval(() => {}, 1_000)
+  try {
+    const hanging = () => new Promise((resolve, reject) => {
+      const onAbort = () => reject(new Error('已中断'))
+      if (clock.signal.aborted) onAbort()
+      else clock.signal.addEventListener('abort', onAbort, { once: true })
+    })
+    const result = await runReview({
+      args: { target: 'files', files: FILES },
+      config: { ...config, softTimeoutMs: 1_000 },
+      runChild: hanging,
+      cwd,
+      signal: clock.signal,
+      clock,
+    })
+    assert.equal(result.status, 'aborted')
+    assert.equal(result.coverage.aborted, true)
+    assert.equal(result.coverage.abortedBy, 'timeout')
+    assert.match(result.coverage.notes.join(' '), /评审整体超时/)
+    assert.match(result.markdown, /已超时/)
+    assert.doesNotMatch(result.markdown, /用户中断/)
+    assert.deepEqual(validateSchema(OUTPUT_SCHEMA, result), [])
+    console.log('  whole-review clock cancels children and returns a partial report')
+  } finally {
+    clearInterval(keepAlive)
+    clock.dispose()
+  }
+})
+
+await withFixture(async (cwd) => {
+  const controller = new AbortController()
+  const pending = runReview({
+    args: { target: 'files', files: FILES },
+    config,
+    runChild: async () => ({ stopReason: 'completed', structured: { findings: [] } }),
+    cwd,
+    signal: controller.signal,
+  })
+  controller.abort(new Error('用户中断'))
+  const result = await pending
+  assert.equal(result.status, 'aborted')
+  assert.equal(result.coverage.abortedBy, 'caller')
+  assert.match(result.coverage.notes.join(' '), /中断/)
+  assert.deepEqual(validateSchema(OUTPUT_SCHEMA, result), [])
+  console.log('  abort during snapshot settles as an aborted report, not a throw')
 })
 
 await withFixture(async (cwd) => {
