@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-review-kit",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "description": "Evidence-gated code review for DeepSeek Harness: verbatim anchors, adversarial verification, explicit coverage gaps.",

@@ -240,6 +240,130 @@ await withFixture(async (cwd) => {
 })
 
 await withFixture(async (cwd) => {
+  const clock = createReviewClock(new AbortController().signal, 800)
+  const keepAlive = setInterval(() => {}, 1_000)
+  try {
+    const runChild = ({ label }) => {
+      if (label.startsWith('review:find:')) {
+        return Promise.resolve({ stopReason: 'completed', structured: { findings: [CACHE] } })
+      }
+      return new Promise((resolve, reject) => {
+        const onAbort = () => reject(new Error('已中断'))
+        if (clock.signal.aborted) onAbort()
+        else clock.signal.addEventListener('abort', onAbort, { once: true })
+      })
+    }
+    const result = await runReview({
+      args: { target: 'files', files: ['src/cache.js'] },
+      config: { ...config, softTimeoutMs: 800 },
+      runChild,
+      cwd,
+      signal: clock.signal,
+      clock,
+    })
+    assert.equal(result.status, 'aborted')
+    assert.equal(result.coverage.abortedBy, 'timeout')
+    assert.equal(result.stats.refuted, 0, '超时不能让未完成的复核变成“被推翻”')
+    assert.equal(result.stats.unverified, 1)
+    assert.doesNotMatch(result.markdown, /复核给出了反证/)
+    console.log('  clock expiry during verification marks unfinished findings unverified')
+  } finally {
+    clearInterval(keepAlive)
+    clock.dispose()
+  }
+})
+
+await withFixture(async (cwd) => {
+  const clock = createReviewClock(new AbortController().signal, 400)
+  const keepAlive = setInterval(() => {}, 1_000)
+  try {
+    const hanging = () => new Promise((resolve, reject) => {
+      const onAbort = () => reject(new Error('已中断'))
+      if (clock.signal.aborted) onAbort()
+      else clock.signal.addEventListener('abort', onAbort, { once: true })
+    })
+    const result = await runReview({
+      args: { target: 'files', files: FILES },
+      config: { ...config, softTimeoutMs: 400, maxConcurrentChildren: 1 },
+      runChild: hanging,
+      cwd,
+      signal: clock.signal,
+      clock,
+    })
+    assert.equal(result.status, 'aborted')
+    const reasons = result.coverage.lensesFailed.map((item) => item.reason)
+    assert.equal(reasons.length, 4)
+    assert.ok(reasons.some((reason) => /整轮超时，未开始/.test(reason)), `排队视角应报超时，实际：${reasons.join(' / ')}`)
+    console.log('  queued lenses report the review timeout, not a caller cancel')
+  } finally {
+    clearInterval(keepAlive)
+    clock.dispose()
+  }
+})
+
+await withFixture(async (cwd) => {
+  const controller = new AbortController()
+  const seen = []
+  const runChild = ({ label }) => {
+    seen.push(label)
+    if (label.startsWith('review:find:')) {
+      return Promise.resolve({ stopReason: 'completed', structured: { findings: [CACHE] } })
+    }
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(new Error('已中断'))
+      if (controller.signal.aborted) onAbort()
+      else controller.signal.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+  const pending = runReview({
+    args: { target: 'files', files: ['src/cache.js'] },
+    config,
+    runChild,
+    cwd,
+    signal: controller.signal,
+  })
+  const deadline = Date.now() + 5_000
+  while (!seen.some((label) => label.startsWith('review:verify:')) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  controller.abort(new Error('用户中断'))
+  const result = await pending
+  assert.equal(result.status, 'aborted')
+  assert.equal(result.coverage.abortedBy, 'caller')
+  assert.equal(result.stats.refuted, 0, '用户中断不能把复核结果算成“被推翻”')
+  assert.equal(result.stats.unverified, 1)
+  assert.doesNotMatch(result.markdown, /复核给出了反证/)
+  console.log('  caller cancel during verification keeps findings unverified')
+})
+
+await withFixture(async (cwd) => {
+  const clock = createReviewClock(new AbortController().signal, 400)
+  const keepAlive = setInterval(() => {}, 1_000)
+  try {
+    const hanging = () => new Promise((resolve, reject) => {
+      const onAbort = () => reject(new Error('已中断'))
+      if (clock.signal.aborted) onAbort()
+      else clock.signal.addEventListener('abort', onAbort, { once: true })
+    })
+    const result = await runReview({
+      args: { target: 'files', files: FILES },
+      config: { ...config, softTimeoutMs: 400 },
+      runChild: hanging,
+      cwd,
+      signal: clock.signal,
+      clock,
+    })
+    const reasons = result.coverage.lensesFailed.map((item) => item.reason)
+    assert.equal(reasons.length, 4)
+    assert.ok(reasons.every((reason) => /整轮超时，未完成/.test(reason)), `运行中的视角应报超时，实际：${reasons.join(' / ')}`)
+    console.log('  in-flight lenses report the review timeout')
+  } finally {
+    clearInterval(keepAlive)
+    clock.dispose()
+  }
+})
+
+await withFixture(async (cwd) => {
   await assert.rejects(
     () => runReview({
       args: { target: 'files', files: ['README.md'] },

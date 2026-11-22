@@ -127,8 +127,8 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 | `maxCandidatesPerLens` | `8` | Truncation only, not a failure |
 | `maxChildren` | `24` | Estimate = lenses + findings × verifiers |
 | `maxConcurrentChildren` | `6` | Shared limiter |
-| `childTimeoutMs` | `600000` | Per finder/verifier child |
-| `softTimeoutMs` | `1500000` | Whole review; on expiry children are cancelled and a partial report is returned |
+| `childTimeoutMs` | `900000` | Per finder/verifier child |
+| `softTimeoutMs` | `1800000` | Whole review; on expiry children are cancelled and a partial report is returned |
 | `onVerifierFailure` | `refute` | `refute` (fail closed) or `observation` |
 | `childMaxDepth` | `1` | `1` = children exist but cannot delegate further |
 | `maxFiles` | `40` | Changed files read per review |
@@ -170,7 +170,7 @@ lib/skill.js        on-demand skill provider (rank 550)
 ### Tests
 
 ```bash
-# 58 unit tests (pure modules, a real temporary git repository, and the
+# 63 unit tests (pure modules, a real temporary git repository, and the
 # activation-spec contract test in test/unit/subagents.test.mjs)
 node --test test/unit/*.test.mjs
 
@@ -315,8 +315,8 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 | `maxCandidatesPerLens` | `8` | 只做截断,不算失败 |
 | `maxChildren` | `24` | 估算 = 视角数 + 发现数 × 复核数 |
 | `maxConcurrentChildren` | `6` | 共享并发上限 |
-| `childTimeoutMs` | `600000` | 单个 finder/verifier |
-| `softTimeoutMs` | `1500000` | 整轮评审;到期取消子代理并返回部分结果 |
+| `childTimeoutMs` | `900000` | 单个 finder/verifier |
+| `softTimeoutMs` | `1800000` | 整轮评审;到期取消子代理并返回部分结果 |
 | `onVerifierFailure` | `refute` | `refute`(宁漏不错)或 `observation` |
 | `childMaxDepth` | `1` | `1` = 子代理存在,但不能继续委派 |
 | `maxFiles` | `40` | 单次读取的改动文件上限 |
@@ -356,7 +356,7 @@ lib/skill.js        按需加载的技能 provider(rank 550)
 ### 测试
 
 ```bash
-# 58 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约)
+# 63 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约)
 node --test test/unit/*.test.mjs
 
 # 脚本化端到端:真实 snapshot/gate/dedupe/verify/render 链路,子代理用脚本替代
