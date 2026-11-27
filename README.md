@@ -20,7 +20,7 @@
   <img alt="DeepSeek Harness" src="https://img.shields.io/badge/DeepSeek-Harness-4D6BFE">
   <img alt="by DeepSeek" src="https://img.shields.io/badge/by-DeepSeek-1D4ED8">
   <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A522-339933">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-86%20unit%20%2B%2013%20e2e-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-89%20unit%20%2B%2013%20e2e-2ea44f">
   <img alt="Read-only" src="https://img.shields.io/badge/read--only-yes-6b7280">
 </p>
 
@@ -152,6 +152,20 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 | `fullFileMaxChars` | `20000` | Files up to this size are quoted in full next to their diff |
 | `gitMode` | `auto` | `auto` / `tool` / `process` |
 
+#### Settings UI (0.3.1)
+
+The row ships a Web client half, so the budget knobs can be edited without touching
+YAML: **Plugins → review-kit → 配置**. The page edits `toolBudgetBase`,
+`finderToolBudget`, `finderToolBudgetMax`, `verifierToolBudget`,
+`verifierToolBudgetMax`, `finderEffort`, `verifierEffort` and `childTimeoutMs`, and
+writes them through the same loader-config path the YAML patch uses (the profile
+patch is updated, then the row reloads). Everything else stays YAML-only.
+
+The Host exports a `Config` schema (schemastery) for the whole config, not just the
+form fields: the loader validates row config against it, and
+`test/unit/config-schema.test.mjs` pins its defaults to `DEFAULT_CONFIG` so the two
+cannot drift.
+
 `gitMode: auto` runs git through the **calling agent's shell tool**
 (`ctx.tools.execute`), so the deployment's permissions, sandbox and audit path stay
 in charge. `process` runs `git` directly, read-only plumbing only.
@@ -249,7 +263,7 @@ lib/skill.js        on-demand skill provider (rank 550)
 ### Tests
 
 ```bash
-# 86 unit tests (pure modules, a real temporary git repository, the
+# 89 unit tests (pure modules, a real temporary git repository, the
 # activation-spec contract test in test/unit/subagents.test.mjs, and the
 # prompt-shape/child-route tests)
 node --test test/unit/*.test.mjs
@@ -417,6 +431,16 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 | `fullFileMaxChars` | `20000` | 不超过这个长度的文件在 diff 之外再附全文 |
 | `gitMode` | `auto` | `auto` / `tool` / `process` |
 
+#### 图形化设置(0.3.1)
+
+插件现在带 Web client 半,预算类开关不用改 YAML 了:**插件 → review-kit → 配置**。
+页面可改 `toolBudgetBase`、`finderToolBudget`、`finderToolBudgetMax`、`verifierToolBudget`、
+`verifierToolBudgetMax`、`finderEffort`、`verifierEffort`、`childTimeoutMs`;
+保存走与 YAML patch 同一条 loader 配置链路(写入 profile patch,随后该行重载)。其余字段仍只支持 YAML。
+
+Host 导出的 `Config` schema 覆盖**全部**配置字段,不只是表单上的那几个:loader 用它校验行配置,
+`test/unit/config-schema.test.mjs` 把它的默认值与 `DEFAULT_CONFIG` 钉在一起,防止两边漂移。
+
 `gitMode: auto` 会让 git 走**调用方 agent 的 shell 工具**(`ctx.tools.execute`),
 从而保留部署的权限、沙箱与审计链路;`process` 直接跑 git,但只跑只读命令。
 
@@ -498,7 +522,7 @@ lib/skill.js        按需加载的技能 provider(rank 550)
 ### 测试
 
 ```bash
-# 86 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
+# 89 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
 # + 提示词形状/子代理路由)
 node --test test/unit/*.test.mjs
 
