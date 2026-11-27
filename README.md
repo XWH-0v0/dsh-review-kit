@@ -70,8 +70,10 @@ plugin_manager(action: "install_bundle", target: "<abs path>/dsh-review-kit")
 ```
 
 The bundle row is declared in [`cordis.patch.yml`](cordis.patch.yml). There is no
-build step and no `@deepseek-ai/*` import: the package is plain ESM plus Node
-builtins, so it works as a linked workspace bundle.
+build step; the only runtime dependency is `@deepseek-ai/schemastery` (for the
+loader-facing `Config` schema), pinned by `pnpm-lock.yaml`. Run `pnpm install` in
+this directory once after cloning — an installed profile links this directory and
+resolves the dependency from its own `node_modules`.
 
 To pin configuration, override the row in the profile:
 
@@ -357,8 +359,10 @@ plugins; no source code was copied.
 plugin_manager(action: "install_bundle", target: "<绝对路径>/dsh-review-kit")
 ```
 
-bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,也不 import
-`@deepseek-ai/*`:整个包是纯 ESM + Node 内置模块,作为链接式工作区 bundle 直接用。
+bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤;唯一的运行期依赖是
+`@deepseek-ai/schemastery`(给 loader 用的 `Config` schema),由 `pnpm-lock.yaml` 固定。
+**clone 之后要在本目录跑一次 `pnpm install`**:安装到 profile 的是本目录的链接,
+依赖从本目录自己的 `node_modules` 解析。
 
 要固定配置,在 profile 里覆盖该行:
 
