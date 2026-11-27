@@ -173,6 +173,31 @@ await withFixture(async (cwd) => {
 })
 
 await withFixture(async (cwd) => {
+  // Per-lens truncation is a coverage fact, not a silent cleanup.
+  const nine = Array.from({ length: 9 }, (_, index) => ({ ...CACHE, title: `候选 ${index}` }))
+  const runChild = ({ label }) => {
+    if (label.startsWith('review:find:')) {
+      return Promise.resolve({
+        stopReason: 'completed',
+        structured: { findings: label.endsWith('correctness') ? nine : [] },
+      })
+    }
+    return Promise.resolve({ stopReason: 'completed', structured: { confirmed: true, confidence: 0.8, reasoning: 'ok', reproduced: false, origin: 'introduced' } })
+  }
+  const result = await runReview({
+    args: { target: 'files', files: ['src/cache.js'] },
+    config,
+    runChild,
+    cwd,
+    signal: new AbortController().signal,
+  })
+  assert.equal(result.stats.candidates, config.maxCandidatesPerLens, '每视角只保留上限内的候选')
+  assert.match(result.coverage.notes.join(' '), /候选截断/, '截断必须写进 coverage.notes')
+  assert.match(result.markdown, /候选截断/, '报告里也要能看到')
+  console.log('  per-lens truncation is reported as a coverage note')
+})
+
+await withFixture(async (cwd) => {
   const controller = new AbortController()
   controller.abort()
   const result = await runReview({

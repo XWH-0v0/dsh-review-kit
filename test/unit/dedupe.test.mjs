@@ -33,11 +33,34 @@ test('dedupe merges the same fingerprint reported by two lenses', () => {
   assert.match(result.findings[0].detail, /攻击者/)
 })
 
-test('dedupe keeps different kinds on the same line', () => {
+test('dedupe merges the exact same anchor across kinds (one line, one defect)', () => {
   const correctness = finding({ kind: 'correctness' })
-  const security = finding({ kind: 'security', lens: 'security', lenses: ['security'] })
-  const result = dedupeFindings([correctness, security])
-  assert.equal(result.findings.length, 2)
+  const lifecycle = finding({
+    kind: 'state',
+    lens: 'lifecycle',
+    lenses: ['lifecycle'],
+    severity: 'critical',
+    detail: '更长的描述，说明缺失键会让后续读取全部崩掉。',
+  })
+  const result = dedupeFindings([correctness, lifecycle])
+  assert.equal(result.findings.length, 1, '同一行同一 anchor 不应重复上报')
+  assert.equal(result.mergedCount, 1)
+  assert.deepEqual([...result.findings[0].lenses].sort(), ['correctness', 'lifecycle'])
+  assert.equal(result.findings[0].severity, 'critical', '保留更严重的严重度')
+  assert.match(result.findings[0].detail, /全部崩掉/)
+})
+
+test('dedupe keeps different anchors on the same line apart', () => {
+  const first = finding({ line: 3, anchor: 'return this.entries.get(key).value', kind: 'correctness' })
+  const second = finding({
+    line: 3,
+    anchor: 'const hit = this.entries.get(key)',
+    kind: 'state',
+    lens: 'lifecycle',
+    lenses: ['lifecycle'],
+  })
+  const result = dedupeFindings([first, second])
+  assert.equal(result.findings.length, 2, '同行但不同 anchor 是两条独立证据')
   assert.equal(result.mergedCount, 0)
 })
 

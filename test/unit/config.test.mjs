@@ -36,6 +36,7 @@ test('child route defaults favour recall for finders and precision for verifiers
   assert.equal(config.finderToolBudgetMax, 18)
   assert.equal(config.verifierToolBudget, 5)
   assert.equal(config.verifierToolBudgetMax, 10)
+  assert.equal(config.toolBudgetBase, 0, '0 = 各角色用自己的基准值')
   // Wall clock and fan-out rebalanced in 0.2.0 after measuring 5-23 minute runs.
   assert.equal(config.maxFindings, 8)
   assert.equal(config.maxCandidatesPerLens, 6)
@@ -66,6 +67,9 @@ test('resolveConfig normalizes effort and preset overrides', () => {
     '上限期望不允许低于基准值',
   )
   assert.equal(resolveConfig({ verifierToolBudgetMax: 999 }).verifierToolBudgetMax, 80)
+  assert.equal(resolveConfig({ toolBudgetBase: 9 }).toolBudgetBase, 9)
+  assert.equal(resolveConfig({ toolBudgetBase: -5 }).toolBudgetBase, 0)
+  assert.equal(resolveConfig({ toolBudgetBase: 999 }).toolBudgetBase, 50)
 })
 
 test('normalizeLenses keeps known keys in canonical order', () => {

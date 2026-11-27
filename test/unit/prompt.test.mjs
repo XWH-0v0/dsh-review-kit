@@ -97,6 +97,38 @@ test('finder prompt states an expected tool budget and forbids the wandering com
   assert.doesNotMatch(prompt, /最多 \d+ 次工具调用/, '旧的硬上限措辞必须消失')
 })
 
+test('两个角色共用 toolBudgetBase 时仍按规模放大', () => {
+  // The user-facing knob: one shared base for both roles. The size-driven
+  // scaling stays, only the hardcoded starting point moves.
+  const config = resolveConfig({ toolBudgetBase: 9 })
+  const small = promptArgs([snapshotFile()])
+  const finder = buildFinderPrompt({ lens: CORRECTNESS, ...small, config })
+  assert.match(finder, /工具预算（期望值）：约 9 次工具调用/)
+
+  const finding = {
+    file: 'src/a.js',
+    line: 1,
+    anchor: 'const a = 1',
+    kind: 'correctness',
+    severity: 'major',
+    title: '断言',
+    detail: '细节',
+    failureScenario: '输入 → 结果',
+  }
+  const verifier = buildVerifierPrompt({
+    finding,
+    file: snapshotFile(),
+    root: 'C:/repo',
+    baselineRef: 'HEAD',
+    config,
+  })
+  assert.match(verifier, /工具预算（期望值）：约 9 次工具调用/, '共享基数也作用于复核')
+
+  const many = Array.from({ length: 6 }, (_, index) => snapshotFile({ path: `src/f${index}.js` }))
+  const scaled = buildFinderPrompt({ lens: CORRECTNESS, ...promptArgs(many), config })
+  assert.match(scaled, /约 12 次工具调用/, '6 个文件在 9 的基数上再加 ceil(5/2)=3')
+})
+
 test('expectedToolBudget scales with scope and stops at the ceiling', () => {
   const base = { base: 6, max: 18 }
   assert.equal(expectedToolBudget({ ...base, files: 1, chars: 500 }), 6, '单文件小改动就是基准值')
