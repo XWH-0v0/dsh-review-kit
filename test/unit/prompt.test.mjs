@@ -16,7 +16,7 @@ import test from 'node:test'
 
 import { resolveConfig } from '../../lib/config.js'
 import { lensList } from '../../lib/lenses.js'
-import { buildFileSection, buildFinderPrompt, buildVerifierPrompt } from '../../lib/prompt.js'
+import { buildFileSection, buildFinderPrompt, buildVerifierPrompt, expectedToolBudget } from '../../lib/prompt.js'
 
 const CONFIG = resolveConfig({})
 
@@ -79,17 +79,35 @@ test('finder prompts share one prefix across lenses', () => {
   assert.match(two.rest, /只关注：注入/)
 })
 
-test('finder prompt states the tool budget and forbids the wandering commands', () => {
+test('finder prompt states an expected tool budget and forbids the wandering commands', () => {
   const args = promptArgs([snapshotFile()])
   const prompt = buildFinderPrompt({ lens: CORRECTNESS, ...args })
+  const expected = expectedToolBudget({
+    base: CONFIG.finderToolBudget,
+    max: CONFIG.finderToolBudgetMax,
+    files: args.reviewed.length,
+    chars: args.blocks.reduce((sum, block) => sum + block.length, 0),
+  })
 
-  assert.match(prompt, new RegExp(`最多 ${CONFIG.finderToolBudget} 次工具调用`))
+  assert.match(prompt, new RegExp(`工具预算（期望值）：约 ${expected} 次工具调用`))
+  assert.match(prompt, /不是硬上限/, '必须说明这是期望值，允许轻微超出')
   assert.match(prompt, /禁止：跑测试套件、安装依赖、列目录、读 node_modules/)
   assert.match(prompt, /只读/)
   assert.doesNotMatch(prompt, /可以在临时目录里写脚本/, '旧的开放式探索指引必须消失')
+  assert.doesNotMatch(prompt, /最多 \d+ 次工具调用/, '旧的硬上限措辞必须消失')
 })
 
-test('verifier prompt states its own budget and forbids the repository test suite', () => {
+test('expectedToolBudget scales with scope and stops at the ceiling', () => {
+  const base = { base: 6, max: 18 }
+  assert.equal(expectedToolBudget({ ...base, files: 1, chars: 500 }), 6, '单文件小改动就是基准值')
+  assert.equal(expectedToolBudget({ ...base, files: 5, chars: 1_000 }), 8, '每多两个文件多给一次')
+  assert.equal(expectedToolBudget({ ...base, files: 10, chars: 60_000 }), 6 + 5 + 2, '改动文本越大越多')
+  assert.equal(expectedToolBudget({ ...base, files: 40, chars: 400_000 }), 18, '不允许无限增长')
+  assert.equal(expectedToolBudget({ ...base, files: 0, chars: 0 }), 6)
+  assert.equal(expectedToolBudget({ base: 0, max: 0, files: 3, chars: 0 }), 1, '至少给一次')
+})
+
+test('verifier prompt states its own expectation and forbids the repository test suite', () => {
   const finding = {
     file: 'src/a.js',
     line: 1,
@@ -108,7 +126,8 @@ test('verifier prompt states its own budget and forbids the repository test suit
     config: CONFIG,
   })
 
-  assert.match(prompt, new RegExp(`最多 ${CONFIG.verifierToolBudget} 次工具调用`))
+  assert.match(prompt, new RegExp(`工具预算（期望值）：约 ${CONFIG.verifierToolBudget} 次工具调用`))
+  assert.match(prompt, /不是硬上限/)
   assert.match(prompt, /禁止：跑仓库测试套件/)
   assert.match(prompt, /推翻/)
   assert.doesNotMatch(prompt, /被评审的版本是提交/, '非提交评审不应出现版本锚定说明')

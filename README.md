@@ -124,8 +124,10 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 | `verifierEffort` | `max` | Child reasoning effort for verifiers; `''` inherits the parent |
 | `finderPreset` | `''` | Optional `agentPreset` id for finders (`''` inherits); hard tool restriction |
 | `verifierPreset` | `''` | Optional `agentPreset` id for verifiers (`''` inherits) |
-| `finderToolBudget` | `6` | Tool calls stated in the finder prompt |
-| `verifierToolBudget` | `5` | Tool calls stated in the verifier prompt |
+| `finderToolBudget` | `6` | Expected finder tool calls for a small change (scales with files and change size) |
+| `finderToolBudgetMax` | `18` | Upper expectation for a big finder scope; a slight overrun is allowed |
+| `verifierToolBudget` | `5` | Expected verifier tool calls for one finding |
+| `verifierToolBudgetMax` | `10` | Upper expectation for one verifier |
 | `depth` | `full` | `full` or `quick` |
 | `lenses` | `[]` | `[]` = all four (`correctness`, `lifecycle`, `contract`, `security`) |
 | `verifiersPerFinding` | `1` | 1–3; all must confirm |
@@ -157,8 +159,10 @@ prompt. Reviews took 5–23 minutes.
 
 0.2.0 changes the shape of the work, not the evidence rules:
 
-- both prompts state a **tool budget** and forbid the test suite, dependency
-  installs and directory walks;
+- both prompts state an **expected** tool budget — 6 calls for a one-file change,
+  scaling to 18 as the changed-file count and change text grow, with a slight
+  overrun explicitly allowed — and forbid the test suite, dependency installs and
+  directory walks;
 - finders run at `finderEffort: high`; verifiers keep `max`, because the verifier
   is the precision gate and finders are expected to over-generate;
 - every lens-independent prompt section comes first, so the four finders share one
@@ -226,7 +230,7 @@ lib/skill.js        on-demand skill provider (rank 550)
 ### Tests
 
 ```bash
-# 75 unit tests (pure modules, a real temporary git repository, the
+# 76 unit tests (pure modules, a real temporary git repository, the
 # activation-spec contract test in test/unit/subagents.test.mjs, and the
 # prompt-shape/child-route tests)
 node --test test/unit/*.test.mjs
@@ -369,8 +373,10 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 | `verifierEffort` | `max` | 复核子代理的推理强度;`''` = 继承父代理 |
 | `finderPreset` | `''` | finder 可选的 `agentPreset` id(`''` 继承);用于硬性限制工具 |
 | `verifierPreset` | `''` | 复核可选的 `agentPreset` id(`''` 继承) |
-| `finderToolBudget` | `6` | 写进 finder 提示词的工具调用预算 |
-| `verifierToolBudget` | `5` | 写进复核提示词的工具调用预算 |
+| `finderToolBudget` | `6` | finder 小改动的期望工具调用数(随文件数与改动量放大) |
+| `finderToolBudgetMax` | `18` | 大范围改动的期望上限;允许轻微超出 |
+| `verifierToolBudget` | `5` | 单条发现的复核期望工具调用数 |
+| `verifierToolBudgetMax` | `10` | 单个复核的期望上限 |
 | `depth` | `full` | `full` 或 `quick` |
 | `lenses` | `[]` | `[]` = 全部四个(`correctness`、`lifecycle`、`contract`、`security`) |
 | `verifiersPerFinding` | `1` | 1–3;全部确认才算通过 |
@@ -399,7 +405,7 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 
 0.2.0 改的是工作形状,不是证据规则:
 
-- 两个提示词都写明**工具预算**,并禁止跑测试套件、装依赖、翻目录;
+- 两个提示词都给出**期望**工具调用数——单文件小改动约 6 次，随改动文件数与改动文本放大到最多 18 次，并明确允许轻微超出——同时禁止跑测试套件、装依赖、翻目录;
 - finder 用 `finderEffort: high`;复核保持 `max`——复核是精度闸门,finder 本来就负责多报;
 - 所有与视角无关的提示词段落放在最前面,四个 finder 共用一个可缓存的提示词前缀;
 - 超过 `fullFileMaxChars` 的文件只给 diff(提示词会说明如何读其余部分);
@@ -462,7 +468,7 @@ lib/skill.js        按需加载的技能 provider(rank 550)
 ### 测试
 
 ```bash
-# 75 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
+# 76 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
 # + 提示词形状/子代理路由)
 node --test test/unit/*.test.mjs
 
