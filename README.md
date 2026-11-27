@@ -171,7 +171,12 @@ prompt. Reviews took 5–23 minutes.
   one shared base, `finderToolBudget` / `verifierToolBudget` move them separately;
   only the starting point moves, the size-driven scaling stays;
 - finders run at `finderEffort: high`; verifiers keep `max`, because the verifier
-  is the precision gate and finders are expected to over-generate;
+  is the precision gate and finders are expected to over-generate. Measured on the
+  real runtime (three arms): dropping the finder to `low` made reviews **slower**
+  (8m46s vs 7m1s on a 10-file commit; 37s vs 25–32s on a one-file fixture) and
+  noisier — the cheaper finder emitted more speculative candidates, which cost
+  extra verifier children, and one verifier hit the per-child timeout. The
+  defaults stay `high` / `max`; retune per deployment if your model differs;
 - every lens-independent prompt section comes first, so the four finders share one
   cacheable prefix;
 - files larger than `fullFileMaxChars` are quoted as a diff only (the prompt says
@@ -417,7 +422,10 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 0.2.0 改的是工作形状,不是证据规则:
 
 - 两个提示词都给出**期望**工具调用数——单文件小改动约 6 次,随改动文件数与改动文本放大到最多 18 次,并明确允许轻微超出——同时禁止跑测试套件、装依赖、翻目录;基数可以自己定:`toolBudgetBase` 让两个角色共用一个基数,`finderToolBudget` / `verifierToolBudget` 分别设;改的只是起点,按改动量放大的规则不变;
-- finder 用 `finderEffort: high`;复核保持 `max`——复核是精度闸门,finder 本来就负责多报;
+- finder 用 `finderEffort: high`;复核保持 `max`——复核是精度闸门,finder 本来就负责多报。
+  实测(三组对照):把 finder 降到 `low` **更慢也更多噪声**(10 文件 commit 上 8m46s vs 7m1s;
+  单文件 fixture 上 37s vs 25–32s)——低 effort 产出更多猜测性候选,复核子代理变多,还有一次撞上
+  单子代理超时。默认保持 `high` / `max`;换模型时再按实测调;
 - 所有与视角无关的提示词段落放在最前面,四个 finder 共用一个可缓存的提示词前缀;
 - 超过 `fullFileMaxChars` 的文件只给 diff(提示词会说明如何读其余部分);
 - `maxFindings` 12 → 8、`maxCandidatesPerLens` 8 → 6、`childTimeoutMs` 15 → 5 分钟、
