@@ -33,11 +33,27 @@ test('dedupe merges the same fingerprint reported by two lenses', () => {
   assert.match(result.findings[0].detail, /攻击者/)
 })
 
-test('dedupe keeps different kinds on the same line', () => {
+test('dedupe keeps different kinds apart even on the same anchor', () => {
+  // Claim identity is (kind, file, anchor): a verifier returns one boolean for
+  // one claim, so two kinds can never be merged into one verdict.
   const correctness = finding({ kind: 'correctness' })
-  const security = finding({ kind: 'security', lens: 'security', lenses: ['security'] })
-  const result = dedupeFindings([correctness, security])
-  assert.equal(result.findings.length, 2)
+  const lifecycle = finding({ kind: 'state', lens: 'lifecycle', lenses: ['lifecycle'] })
+  const result = dedupeFindings([correctness, lifecycle])
+  assert.equal(result.findings.length, 2, '不同 kind 的两条结论各自复核')
+  assert.equal(result.mergedCount, 0)
+})
+
+test('dedupe keeps different anchors on the same line apart', () => {
+  const first = finding({ line: 3, anchor: 'return this.entries.get(key).value', kind: 'correctness' })
+  const second = finding({
+    line: 3,
+    anchor: 'const hit = this.entries.get(key)',
+    kind: 'state',
+    lens: 'lifecycle',
+    lenses: ['lifecycle'],
+  })
+  const result = dedupeFindings([first, second])
+  assert.equal(result.findings.length, 2, '同行但不同 anchor 是两条独立证据')
   assert.equal(result.mergedCount, 0)
 })
 

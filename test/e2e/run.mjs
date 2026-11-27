@@ -173,6 +173,89 @@ await withFixture(async (cwd) => {
 })
 
 await withFixture(async (cwd) => {
+  // Per-lens truncation is a coverage fact, not a silent cleanup.
+  const nine = Array.from({ length: 9 }, (_, index) => ({ ...CACHE, title: `候选 ${index}` }))
+  const runChild = ({ label }) => {
+    if (label.startsWith('review:find:')) {
+      return Promise.resolve({
+        stopReason: 'completed',
+        structured: { findings: label.endsWith('correctness') ? nine : [] },
+      })
+    }
+    return Promise.resolve({ stopReason: 'completed', structured: { confirmed: true, confidence: 0.8, reasoning: 'ok', reproduced: false, origin: 'introduced' } })
+  }
+  const result = await runReview({
+    args: { target: 'files', files: ['src/cache.js'] },
+    config,
+    runChild,
+    cwd,
+    signal: new AbortController().signal,
+  })
+  assert.equal(result.stats.candidates, config.maxCandidatesPerLens, '每视角只保留上限内的候选')
+  assert.match(result.coverage.notes.join(' '), /候选截断/, '截断必须写进 coverage.notes')
+  assert.match(result.markdown, /候选截断/, '报告里也要能看到')
+  console.log('  per-lens truncation is reported as a coverage note')
+})
+
+await withFixture(async (cwd) => {
+  // Two lenses, one line, two kinds: two independent claims, each verified, and
+  // the report groups them by location instead of printing a duplicate.
+  const sibling = { ...CACHE, kind: 'state', title: '缓存未命中状态没有被表达' }
+  let verifiers = 0
+  const runChild = ({ label }) => {
+    if (label.startsWith('review:find:')) {
+      const findings = label === 'review:find:correctness' ? [CACHE] : label === 'review:find:lifecycle' ? [sibling] : []
+      return Promise.resolve({ stopReason: 'completed', structured: { findings } })
+    }
+    verifiers += 1
+    return Promise.resolve({ stopReason: 'completed', structured: { confirmed: true, confidence: 0.8, reasoning: 'ok', reproduced: false, origin: 'introduced' } })
+  }
+  const result = await runReview({
+    args: { target: 'files', files: ['src/cache.js'] },
+    config,
+    runChild,
+    cwd,
+    signal: new AbortController().signal,
+  })
+  assert.equal(result.stats.confirmed, 2, '同一行的两条结论都要确认')
+  assert.equal(verifiers, 2, '两条结论各自复核，不能合并成一次判决')
+  assert.match(result.markdown, /2 条确认（1 处代码位置）/)
+  assert.match(result.markdown, /同一代码行的其他独立结论/)
+  console.log('  same-line claims stay separate and are grouped in the report')
+})
+
+await withFixture(async (cwd) => {
+  // A transient child failure (measured: MALFORMED_RESPONSE on tool input) must
+  // not cost the whole lens; the finder is retried once and the report says so.
+  let correctnessAttempts = 0
+  const runChild = ({ label }) => {
+    if (label.startsWith('review:find:')) {
+      if (label === 'review:find:correctness' && correctnessAttempts === 0) {
+        correctnessAttempts += 1
+        return Promise.resolve({ stopReason: 'error', structured: undefined, diagnostic: 'tool input is invalid JSON' })
+      }
+      return Promise.resolve({
+        stopReason: 'completed',
+        structured: { findings: label === 'review:find:correctness' ? [CACHE] : [] },
+      })
+    }
+    return Promise.resolve({ stopReason: 'completed', structured: { confirmed: true, confidence: 0.8, reasoning: 'ok', reproduced: false, origin: 'introduced' } })
+  }
+  const result = await runReview({
+    args: { target: 'files', files: ['src/cache.js'] },
+    config,
+    runChild,
+    cwd,
+    signal: new AbortController().signal,
+  })
+  assert.equal(correctnessAttempts, 1, '第一次正确性 finder 确实失败过')
+  assert.equal(result.coverage.lensesFailed.length, 0, '重试成功后不应把视角记成失败')
+  assert.match(result.coverage.notes.join(' '), /视角重试/)
+  assert.equal(result.stats.confirmed, 1)
+  console.log('  a transient finder failure is retried and reported')
+})
+
+await withFixture(async (cwd) => {
   const controller = new AbortController()
   controller.abort()
   const result = await runReview({

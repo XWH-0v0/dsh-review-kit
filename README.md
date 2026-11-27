@@ -20,7 +20,7 @@
   <img alt="DeepSeek Harness" src="https://img.shields.io/badge/DeepSeek-Harness-4D6BFE">
   <img alt="by DeepSeek" src="https://img.shields.io/badge/by-DeepSeek-1D4ED8">
   <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A522-339933">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-45%20unit%20%2B%20e2e-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-86%20unit%20%2B%2013%20e2e-2ea44f">
   <img alt="Read-only" src="https://img.shields.io/badge/read--only-yes-6b7280">
 </p>
 
@@ -109,9 +109,16 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 
 1. **Confirmed** — `file:line`, the verbatim quoted line, the failure scenario, the
    verifier's conclusion and confidence, and the origin. These are the ones to fix.
+   A claim may list *additional independent conclusions on the same line*: two
+   lenses can file two different claims about one line, each with its own
+   verifier. They are grouped under the first claim so the report never reads as
+   a duplicate, and they are never merged into one verdict.
 2. **Refuted** — collapsed; the verifier's counter-evidence. Do not report these as
    problems.
-3. **Unverified** — the verifier was unavailable. Not confirmed.
+3. **Unverified** — the verifier was unavailable. Not confirmed. Findings that
+   failed closed because a verifier timed out or crashed appear under their own
+   heading (*复核不可用、按未通过处理*), never under "the verifier gave
+   counter-evidence".
 4. **Coverage / skipped / stats** — the honest part. `✅ ran, nothing found` is not
    the same as `⚠️ failed`. A review with coverage gaps must be reported as such.
 
@@ -124,6 +131,7 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 | `verifierEffort` | `max` | Child reasoning effort for verifiers; `''` inherits the parent |
 | `finderPreset` | `''` | Optional `agentPreset` id for finders (`''` inherits); hard tool restriction |
 | `verifierPreset` | `''` | Optional `agentPreset` id for verifiers (`''` inherits) |
+| `toolBudgetBase` | `0` | Shared base for both roles' expected tool calls; `0` = each role uses its own base below. The size-driven scaling is unchanged |
 | `finderToolBudget` | `6` | Expected finder tool calls for a small change (scales with files and change size) |
 | `finderToolBudgetMax` | `18` | Upper expectation for a big finder scope; a slight overrun is allowed |
 | `verifierToolBudget` | `5` | Expected verifier tool calls for one finding |
@@ -135,7 +143,7 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 | `maxCandidatesPerLens` | `6` | Truncation only, not a failure |
 | `maxChildren` | `24` | Estimate = lenses + findings × verifiers |
 | `maxConcurrentChildren` | `8` | Shared limiter; the subagent runtime's own tree capacity defaults to 8 |
-| `childTimeoutMs` | `300000` | Per finder/verifier child |
+| `childTimeoutMs` | `420000` | Per finder/verifier child |
 | `softTimeoutMs` | `900000` | Whole review; on expiry children are cancelled and a partial report is returned |
 | `onVerifierFailure` | `refute` | `refute` (fail closed) or `observation` |
 | `childMaxDepth` | `1` | `1` = children exist but cannot delegate further |
@@ -162,14 +170,25 @@ prompt. Reviews took 5–23 minutes.
 - both prompts state an **expected** tool budget — 6 calls for a one-file change,
   scaling to 18 as the changed-file count and change text grow, with a slight
   overrun explicitly allowed — and forbid the test suite, dependency installs and
-  directory walks;
+  directory walks. The base is yours to set: `toolBudgetBase` moves both roles to
+  one shared base, `finderToolBudget` / `verifierToolBudget` move them separately;
+  only the starting point moves, the size-driven scaling stays;
 - finders run at `finderEffort: high`; verifiers keep `max`, because the verifier
-  is the precision gate and finders are expected to over-generate;
+  is the precision gate and finders are expected to over-generate. Measured on the
+  real runtime (three arms): dropping the finder to `low` made reviews **slower**
+  (8m46s vs 7m1s on a 10-file commit; 37s vs 25–32s on a one-file fixture) and
+  noisier — the cheaper finder emitted more speculative candidates, which cost
+  extra verifier children, and one verifier hit the per-child timeout. The
+  defaults stay `high` / `max`; retune per deployment if your model differs;
 - every lens-independent prompt section comes first, so the four finders share one
   cacheable prefix;
+- a finder that dies from a transient protocol error (measured once: a child
+  stream ending in `MALFORMED_RESPONSE: tool input is invalid JSON`) is retried
+  **once**; timeouts and cancellations are never retried, and every retry is
+  written into the coverage notes;
 - files larger than `fullFileMaxChars` are quoted as a diff only (the prompt says
   how to read the rest);
-- `maxFindings` 12 → 8, `maxCandidatesPerLens` 8 → 6, `childTimeoutMs` 15 → 5 min,
+- `maxFindings` 12 → 8, `maxCandidatesPerLens` 8 → 6, `childTimeoutMs` 15 → 7 min (0.3.0),
   `softTimeoutMs` 30 → 15 min.
 
 Hard tool restriction is opt-in. A prompt states the budget; only a preset can
@@ -230,7 +249,7 @@ lib/skill.js        on-demand skill provider (rank 550)
 ### Tests
 
 ```bash
-# 76 unit tests (pure modules, a real temporary git repository, the
+# 86 unit tests (pure modules, a real temporary git repository, the
 # activation-spec contract test in test/unit/subagents.test.mjs, and the
 # prompt-shape/child-route tests)
 node --test test/unit/*.test.mjs
@@ -246,6 +265,7 @@ The e2e harness runs the fixture project at `test/fixtures/buggy-project`
 - the two real bugs are confirmed and the `<=` pagination finding is refuted,
 - every confirmed line number points at the exact quoted source line,
 - a clean run still reports coverage, an aborted run returns a schema-valid partial result,
+- a lens returning more candidates than the per-lens ceiling is reported as a coverage note,
 - a documentation-only scope is refused.
 
 ### Runtime notes
@@ -359,8 +379,11 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 ### 怎么读报告
 
 1. **确认项** —— `文件:行`、逐字引用的源码行、失败场景、复核结论与置信度、归属。这些才是要修的。
+   一条确认项下面可能列出**同一代码行的其他独立结论**:两个视角对同一行各报一条结论时,
+   每条都有自己的复核者,报告把它们归到第一条下面而不是并排重复,也绝不合并成一次判决。
 2. **被推翻** —— 折叠显示,附带复核者的反证。不要把这里的东西当成问题汇报。
-3. **未验证** —— 复核者不可用。不等于已确认。
+3. **未验证** —— 复核者不可用。不等于已确认。复核者超时/崩溃后按 fail-closed 判未通过的,
+   单列在「复核不可用、按未通过处理」标题下,**不会**混进「复核给出了反证」。
 4. **覆盖 / 跳过 / 统计** —— 最诚实的一段。`✅ 已跑,无发现` 和 `⚠️ 失败` 是两回事;
    有覆盖缺口就必须如实说明。
 
@@ -373,6 +396,7 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 | `verifierEffort` | `max` | 复核子代理的推理强度;`''` = 继承父代理 |
 | `finderPreset` | `''` | finder 可选的 `agentPreset` id(`''` 继承);用于硬性限制工具 |
 | `verifierPreset` | `''` | 复核可选的 `agentPreset` id(`''` 继承) |
+| `toolBudgetBase` | `0` | 两个角色共用的期望工具调用基数;`0` = 各角色用自己的基数(见下两行)。按改动量放大的规则不变 |
 | `finderToolBudget` | `6` | finder 小改动的期望工具调用数(随文件数与改动量放大) |
 | `finderToolBudgetMax` | `18` | 大范围改动的期望上限;允许轻微超出 |
 | `verifierToolBudget` | `5` | 单条发现的复核期望工具调用数 |
@@ -384,7 +408,7 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 | `maxCandidatesPerLens` | `6` | 只做截断,不算失败 |
 | `maxChildren` | `24` | 估算 = 视角数 + 发现数 × 复核数 |
 | `maxConcurrentChildren` | `8` | 共享并发上限;subagent 运行时自身的树容量默认也是 8 |
-| `childTimeoutMs` | `300000` | 单个 finder/verifier |
+| `childTimeoutMs` | `420000` | 单个 finder/verifier |
 | `softTimeoutMs` | `900000` | 整轮评审;到期取消子代理并返回部分结果 |
 | `onVerifierFailure` | `refute` | `refute`(宁漏不错)或 `observation` |
 | `childMaxDepth` | `1` | `1` = 子代理存在,但不能继续委派 |
@@ -405,11 +429,17 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 
 0.2.0 改的是工作形状,不是证据规则:
 
-- 两个提示词都给出**期望**工具调用数——单文件小改动约 6 次，随改动文件数与改动文本放大到最多 18 次，并明确允许轻微超出——同时禁止跑测试套件、装依赖、翻目录;
-- finder 用 `finderEffort: high`;复核保持 `max`——复核是精度闸门,finder 本来就负责多报;
+- 两个提示词都给出**期望**工具调用数——单文件小改动约 6 次,随改动文件数与改动文本放大到最多 18 次,并明确允许轻微超出——同时禁止跑测试套件、装依赖、翻目录;基数可以自己定:`toolBudgetBase` 让两个角色共用一个基数,`finderToolBudget` / `verifierToolBudget` 分别设;改的只是起点,按改动量放大的规则不变;
+- finder 用 `finderEffort: high`;复核保持 `max`——复核是精度闸门,finder 本来就负责多报。
+  实测(三组对照):把 finder 降到 `low` **更慢也更多噪声**(10 文件 commit 上 8m46s vs 7m1s;
+  单文件 fixture 上 37s vs 25–32s)——低 effort 产出更多猜测性候选,复核子代理变多,还有一次撞上
+  单子代理超时。默认保持 `high` / `max`;换模型时再按实测调;
 - 所有与视角无关的提示词段落放在最前面,四个 finder 共用一个可缓存的提示词前缀;
+- 某个 finder 因**临时协议错误**挂掉(实测过一次:子会话流以
+  `MALFORMED_RESPONSE: tool input is invalid JSON` 结束)会**重试一次**;超时与取消不重试,
+  每次重试都写进覆盖说明;
 - 超过 `fullFileMaxChars` 的文件只给 diff(提示词会说明如何读其余部分);
-- `maxFindings` 12 → 8、`maxCandidatesPerLens` 8 → 6、`childTimeoutMs` 15 → 5 分钟、
+- `maxFindings` 12 → 8、`maxCandidatesPerLens` 8 → 6、`childTimeoutMs` 15 → 7 分钟(0.3.0)、
   `softTimeoutMs` 30 → 15 分钟。
 
 硬性工具限制是可选项:提示词只写预算,**只有 preset 能真正禁用工具**。在 profile 里声明
@@ -468,7 +498,7 @@ lib/skill.js        按需加载的技能 provider(rank 550)
 ### 测试
 
 ```bash
-# 76 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
+# 86 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
 # + 提示词形状/子代理路由)
 node --test test/unit/*.test.mjs
 
@@ -482,6 +512,7 @@ node test/e2e/run.mjs
 - 两个真实缺陷被确认,`<=` 分页那条被复核推翻;
 - 每条确认项的行号与引用行逐字一致;
 - 干净跑仍然报覆盖;中断跑返回 schema 合法的部分结果;
+- 某个视角返回的候选超过每视角上限时,截断会作为覆盖说明写进报告;
 - 纯文档范围会被拒绝。
 
 ### 运行时说明
