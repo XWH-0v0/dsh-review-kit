@@ -41,7 +41,7 @@ test('child route defaults favour recall for finders and precision for verifiers
   assert.equal(config.maxFindings, 8)
   assert.equal(config.maxCandidatesPerLens, 6)
   assert.equal(config.maxConcurrentChildren, 8)
-  assert.equal(config.childTimeoutMs, 300_000)
+  assert.equal(config.childTimeoutMs, 420_000)
   assert.equal(config.softTimeoutMs, 900_000)
   assert.equal(config.fullFileMaxChars, 20_000)
 })

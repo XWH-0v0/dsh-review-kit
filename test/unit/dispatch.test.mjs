@@ -67,3 +67,64 @@ test('没有超出上限时不产生截断记录', async () => {
   assert.equal(outcome.candidates.length, 6 + 1)
   assert.deepEqual(outcome.truncated, [])
 })
+
+/**
+ * @param {Function} runChild child runner.
+ * @returns {Promise<object>} dispatch outcome.
+ */
+function dispatchWith(runChild) {
+  return dispatchFinders({
+    lenses: lensList(['correctness']),
+    targetDescription: '指定文件',
+    root: 'C:/repo',
+    fileSection: { blocks: ['### src/a.js\n'], reviewed: ['src/a.js'], skipped: [] },
+    config: resolveConfig({}),
+    runChild,
+    limiter: createLimiter(1),
+    signal: new AbortController().signal,
+  })
+}
+
+test('视角因一次临时错误失败时会重试并记录', async () => {
+  let calls = 0
+  const outcome = await dispatchWith(async () => {
+    calls += 1
+    if (calls === 1) return { stopReason: 'error', structured: undefined, diagnostic: 'tool input is invalid JSON' }
+    return { stopReason: 'completed', structured: { findings: candidates(1) } }
+  })
+
+  assert.equal(calls, 2, '失败后应重试一次')
+  assert.equal(outcome.candidates.length, 1)
+  assert.equal(outcome.failed.length, 0)
+  assert.equal(outcome.retried.length, 1)
+  assert.equal(outcome.retried[0].lens, 'correctness')
+  assert.equal(outcome.retried[0].attempts, 2)
+  assert.match(outcome.retried[0].firstError, /子代理未完成/)
+  assert.equal(outcome.retried[0].ok, true, '重试成功要标明')
+})
+
+test('超时不重试，避免把预算花在一个卡住的子代理上', async () => {
+  let calls = 0
+  const outcome = await dispatchWith(async () => {
+    calls += 1
+    throw new Error('子代理超时（420s）')
+  })
+
+  assert.equal(calls, 1, '超时不应重试')
+  assert.equal(outcome.failed.length, 1)
+  assert.equal(outcome.retried.length, 0)
+})
+
+test('重试仍失败时保留两次的失败事实', async () => {
+  let calls = 0
+  const outcome = await dispatchWith(async () => {
+    calls += 1
+    return { stopReason: 'error', structured: undefined }
+  })
+
+  assert.equal(calls, 2)
+  assert.equal(outcome.failed.length, 1)
+  assert.equal(outcome.retried.length, 1)
+  assert.equal(outcome.retried[0].ok, false)
+  assert.match(outcome.failed[0].reason, /子代理未完成/)
+})

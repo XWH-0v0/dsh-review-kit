@@ -20,7 +20,7 @@
   <img alt="DeepSeek Harness" src="https://img.shields.io/badge/DeepSeek-Harness-4D6BFE">
   <img alt="by DeepSeek" src="https://img.shields.io/badge/by-DeepSeek-1D4ED8">
   <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A522-339933">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-81%20unit%20%2B%2012%20e2e-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-86%20unit%20%2B%2013%20e2e-2ea44f">
   <img alt="Read-only" src="https://img.shields.io/badge/read--only-yes-6b7280">
 </p>
 
@@ -115,7 +115,10 @@ verifier reproduced it with a throwaway script outside the repo (confidence
    a duplicate, and they are never merged into one verdict.
 2. **Refuted** — collapsed; the verifier's counter-evidence. Do not report these as
    problems.
-3. **Unverified** — the verifier was unavailable. Not confirmed.
+3. **Unverified** — the verifier was unavailable. Not confirmed. Findings that
+   failed closed because a verifier timed out or crashed appear under their own
+   heading (*复核不可用、按未通过处理*), never under "the verifier gave
+   counter-evidence".
 4. **Coverage / skipped / stats** — the honest part. `✅ ran, nothing found` is not
    the same as `⚠️ failed`. A review with coverage gaps must be reported as such.
 
@@ -140,7 +143,7 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 | `maxCandidatesPerLens` | `6` | Truncation only, not a failure |
 | `maxChildren` | `24` | Estimate = lenses + findings × verifiers |
 | `maxConcurrentChildren` | `8` | Shared limiter; the subagent runtime's own tree capacity defaults to 8 |
-| `childTimeoutMs` | `300000` | Per finder/verifier child |
+| `childTimeoutMs` | `420000` | Per finder/verifier child |
 | `softTimeoutMs` | `900000` | Whole review; on expiry children are cancelled and a partial report is returned |
 | `onVerifierFailure` | `refute` | `refute` (fail closed) or `observation` |
 | `childMaxDepth` | `1` | `1` = children exist but cannot delegate further |
@@ -179,9 +182,13 @@ prompt. Reviews took 5–23 minutes.
   defaults stay `high` / `max`; retune per deployment if your model differs;
 - every lens-independent prompt section comes first, so the four finders share one
   cacheable prefix;
+- a finder that dies from a transient protocol error (measured once: a child
+  stream ending in `MALFORMED_RESPONSE: tool input is invalid JSON`) is retried
+  **once**; timeouts and cancellations are never retried, and every retry is
+  written into the coverage notes;
 - files larger than `fullFileMaxChars` are quoted as a diff only (the prompt says
   how to read the rest);
-- `maxFindings` 12 → 8, `maxCandidatesPerLens` 8 → 6, `childTimeoutMs` 15 → 5 min,
+- `maxFindings` 12 → 8, `maxCandidatesPerLens` 8 → 6, `childTimeoutMs` 15 → 7 min (0.3.0),
   `softTimeoutMs` 30 → 15 min.
 
 Hard tool restriction is opt-in. A prompt states the budget; only a preset can
@@ -242,7 +249,7 @@ lib/skill.js        on-demand skill provider (rank 550)
 ### Tests
 
 ```bash
-# 81 unit tests (pure modules, a real temporary git repository, the
+# 86 unit tests (pure modules, a real temporary git repository, the
 # activation-spec contract test in test/unit/subagents.test.mjs, and the
 # prompt-shape/child-route tests)
 node --test test/unit/*.test.mjs
@@ -375,7 +382,8 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
    一条确认项下面可能列出**同一代码行的其他独立结论**:两个视角对同一行各报一条结论时,
    每条都有自己的复核者,报告把它们归到第一条下面而不是并排重复,也绝不合并成一次判决。
 2. **被推翻** —— 折叠显示,附带复核者的反证。不要把这里的东西当成问题汇报。
-3. **未验证** —— 复核者不可用。不等于已确认。
+3. **未验证** —— 复核者不可用。不等于已确认。复核者超时/崩溃后按 fail-closed 判未通过的,
+   单列在「复核不可用、按未通过处理」标题下,**不会**混进「复核给出了反证」。
 4. **覆盖 / 跳过 / 统计** —— 最诚实的一段。`✅ 已跑,无发现` 和 `⚠️ 失败` 是两回事;
    有覆盖缺口就必须如实说明。
 
@@ -400,7 +408,7 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 | `maxCandidatesPerLens` | `6` | 只做截断,不算失败 |
 | `maxChildren` | `24` | 估算 = 视角数 + 发现数 × 复核数 |
 | `maxConcurrentChildren` | `8` | 共享并发上限;subagent 运行时自身的树容量默认也是 8 |
-| `childTimeoutMs` | `300000` | 单个 finder/verifier |
+| `childTimeoutMs` | `420000` | 单个 finder/verifier |
 | `softTimeoutMs` | `900000` | 整轮评审;到期取消子代理并返回部分结果 |
 | `onVerifierFailure` | `refute` | `refute`(宁漏不错)或 `observation` |
 | `childMaxDepth` | `1` | `1` = 子代理存在,但不能继续委派 |
@@ -427,8 +435,11 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
   单文件 fixture 上 37s vs 25–32s)——低 effort 产出更多猜测性候选,复核子代理变多,还有一次撞上
   单子代理超时。默认保持 `high` / `max`;换模型时再按实测调;
 - 所有与视角无关的提示词段落放在最前面,四个 finder 共用一个可缓存的提示词前缀;
+- 某个 finder 因**临时协议错误**挂掉(实测过一次:子会话流以
+  `MALFORMED_RESPONSE: tool input is invalid JSON` 结束)会**重试一次**;超时与取消不重试,
+  每次重试都写进覆盖说明;
 - 超过 `fullFileMaxChars` 的文件只给 diff(提示词会说明如何读其余部分);
-- `maxFindings` 12 → 8、`maxCandidatesPerLens` 8 → 6、`childTimeoutMs` 15 → 5 分钟、
+- `maxFindings` 12 → 8、`maxCandidatesPerLens` 8 → 6、`childTimeoutMs` 15 → 7 分钟(0.3.0)、
   `softTimeoutMs` 30 → 15 分钟。
 
 硬性工具限制是可选项:提示词只写预算,**只有 preset 能真正禁用工具**。在 profile 里声明
@@ -487,7 +498,7 @@ lib/skill.js        按需加载的技能 provider(rank 550)
 ### 测试
 
 ```bash
-# 81 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
+# 86 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
 # + 提示词形状/子代理路由)
 node --test test/unit/*.test.mjs
 

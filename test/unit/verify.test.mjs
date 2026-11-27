@@ -88,6 +88,19 @@ test('非超时的复核失败仍按 refute 策略处理', async () => {
   const [finding] = outcome.findings
   assert.equal(finding.status, 'refuted')
   assert.match(finding.refutation, /复核者不可用/)
+  assert.equal(finding.unavailable, true, '策略性未通过要打标记，报告才能与真反证分开')
+})
+
+test('复核真的给出反证时没有「不可用」标记', async () => {
+  const outcome = await verify(async () => ({
+    stopReason: 'completed',
+    structured: { confirmed: false, confidence: 0.3, reasoning: '构造输入未复现。' },
+  }), new AbortController().signal, false)
+
+  const [finding] = outcome.findings
+  assert.equal(finding.status, 'refuted')
+  assert.equal(finding.unavailable, undefined, '有反证的推翻不能被标成不可用')
+  assert.match(finding.refutation, /未复现/)
 })
 
 test('调用方中断且未超时时，早退分支写已中断而不是整轮超时', async () => {

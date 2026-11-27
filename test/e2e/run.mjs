@@ -225,6 +225,37 @@ await withFixture(async (cwd) => {
 })
 
 await withFixture(async (cwd) => {
+  // A transient child failure (measured: MALFORMED_RESPONSE on tool input) must
+  // not cost the whole lens; the finder is retried once and the report says so.
+  let correctnessAttempts = 0
+  const runChild = ({ label }) => {
+    if (label.startsWith('review:find:')) {
+      if (label === 'review:find:correctness' && correctnessAttempts === 0) {
+        correctnessAttempts += 1
+        return Promise.resolve({ stopReason: 'error', structured: undefined, diagnostic: 'tool input is invalid JSON' })
+      }
+      return Promise.resolve({
+        stopReason: 'completed',
+        structured: { findings: label === 'review:find:correctness' ? [CACHE] : [] },
+      })
+    }
+    return Promise.resolve({ stopReason: 'completed', structured: { confirmed: true, confidence: 0.8, reasoning: 'ok', reproduced: false, origin: 'introduced' } })
+  }
+  const result = await runReview({
+    args: { target: 'files', files: ['src/cache.js'] },
+    config,
+    runChild,
+    cwd,
+    signal: new AbortController().signal,
+  })
+  assert.equal(correctnessAttempts, 1, '第一次正确性 finder 确实失败过')
+  assert.equal(result.coverage.lensesFailed.length, 0, '重试成功后不应把视角记成失败')
+  assert.match(result.coverage.notes.join(' '), /视角重试/)
+  assert.equal(result.stats.confirmed, 1)
+  console.log('  a transient finder failure is retried and reported')
+})
+
+await withFixture(async (cwd) => {
   const controller = new AbortController()
   controller.abort()
   const result = await runReview({
