@@ -14,19 +14,41 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import test from 'node:test'
 
 import { Config } from '../../lib/index.js'
-import { DEFAULT_CONFIG } from '../../lib/config.js'
+import { DEFAULT_CONFIG, readConfigValue, resolveConfig } from '../../lib/config.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const PACKAGE = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+const VOLATILE_FIELDS = [
+  'finderEffort', 'verifierEffort', 'toolBudgetBase', 'finderToolBudget',
+  'finderToolBudgetMax', 'verifierToolBudget', 'verifierToolBudgetMax', 'childTimeoutMs',
+]
 
 test('Config 声明了 DEFAULT_CONFIG 的每一个字段，默认值逐字段一致', () => {
-  const resolved = Config({})
-  assert.deepEqual(Object.keys(resolved).sort(), Object.keys(DEFAULT_CONFIG).sort())
-  for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
-    assert.deepEqual(resolved[key], value, `${key} 的 schema 默认值与 DEFAULT_CONFIG 不一致`)
+  const raw = Config({})
+  assert.deepEqual(Object.keys(raw).sort(), Object.keys(DEFAULT_CONFIG).sort())
+  // Settings only exposes `.volatile()` fields, and this is what the row's
+  // configuration page edits; the rest of the config stays YAML-only.
+  for (const key of VOLATILE_FIELDS) {
+    assert.equal(typeof raw[key].get, 'function', `${key} 必须是 volatile，否则设置表单里看不到它`)
   }
-  assert.deepEqual(Config({ childTimeoutMs: 60_000 }).childTimeoutMs, 60_000, '显式值要保留')
+  assert.equal(typeof raw.depth, 'string', '非表单字段保持普通值')
+  assert.deepEqual(readConfigValue(Config({ childTimeoutMs: 60_000 }).childTimeoutMs), 60_000, '显式值要保留')
+  // `lenses: []` is the stored "all four" marker; the resolved config expands it.
+  const expected = { ...DEFAULT_CONFIG, lenses: resolveConfig({}).lenses }
+  assert.deepEqual(resolveConfig(raw), expected, 'schema 默认值经 resolveConfig 必须还原成 DEFAULT_CONFIG')
   assert.equal(Config({ unknownKey: 1 }).unknownKey, 1, 'schema 宽松：未声明的键透传，不会丢掉用户的既有配置')
+})
+
+test('volatile 字段被原地更新后，重新 resolveConfig 能读到新值', () => {
+  const raw = Config({})
+  assert.equal(resolveConfig(raw).finderToolBudget, 6)
+  const ref = raw.finderToolBudget
+  const writer = Object.getOwnPropertySymbols(ref).find((symbol) => typeof ref[symbol] === 'function')
+  assert.ok(writer !== undefined, 'volatile 引用必须带写入符号（loader 靠它原地提交新快照）')
+  ref[writer](12)
+  // The plugin must read the config per call; a snapshot taken in apply() would still say 6.
+  assert.equal(resolveConfig(raw).finderToolBudget, 12)
+  assert.equal(resolveConfig(raw).finderToolBudgetMax, 18, '其它字段不受影响')
 })
 
 test('package.json 暴露 client 半并声明 web 平台', () => {

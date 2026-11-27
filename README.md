@@ -163,6 +163,10 @@ YAML: **Plugins → review-kit → 配置**. The page edits `toolBudgetBase`,
 writes them through the same loader-config path the YAML patch uses (the profile
 patch is updated, then the row reloads). Everything else stays YAML-only.
 
+These eight fields are declared `.volatile()` in the schema — DSH's settings forms
+only expose volatile fields — and the plugin re-reads its config on every tool call,
+so an accepted edit applies to the **next review** without a plugin remount.
+
 The Host exports a `Config` schema (schemastery) for the whole config, not just the
 form fields: the loader validates row config against it, and
 `test/unit/config-schema.test.mjs` pins its defaults to `DEFAULT_CONFIG` so the two
@@ -441,6 +445,9 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤;
 页面可改 `toolBudgetBase`、`finderToolBudget`、`finderToolBudgetMax`、`verifierToolBudget`、
 `verifierToolBudgetMax`、`finderEffort`、`verifierEffort`、`childTimeoutMs`;
 保存走与 YAML patch 同一条 loader 配置链路(写入 profile patch,随后该行重载)。其余字段仍只支持 YAML。
+
+这 8 个字段在 schema 里标了 `.volatile()`(DSH 的设置表单只暴露 volatile 字段),
+插件在**每次工具调用时**重新读取配置,所以保存后的值对**下一次评审**立即生效,不需要重载插件。
 
 Host 导出的 `Config` schema 覆盖**全部**配置字段,不只是表单上的那几个:loader 用它校验行配置,
 `test/unit/config-schema.test.mjs` 把它的默认值与 `DEFAULT_CONFIG` 钉在一起,防止两边漂移。
