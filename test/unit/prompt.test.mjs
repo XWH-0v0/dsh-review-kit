@@ -111,6 +111,7 @@ test('verifier prompt states its own budget and forbids the repository test suit
   assert.match(prompt, new RegExp(`最多 ${CONFIG.verifierToolBudget} 次工具调用`))
   assert.match(prompt, /禁止：跑仓库测试套件/)
   assert.match(prompt, /推翻/)
+  assert.doesNotMatch(prompt, /被评审的版本是提交/, '非提交评审不应出现版本锚定说明')
 })
 
 test('large files are quoted as a diff only; small files keep their body', () => {
