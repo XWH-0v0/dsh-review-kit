@@ -20,7 +20,7 @@
   <img alt="DeepSeek Harness" src="https://img.shields.io/badge/DeepSeek-Harness-4D6BFE">
   <img alt="by DeepSeek" src="https://img.shields.io/badge/by-DeepSeek-1D4ED8">
   <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A522-339933">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-80%20unit%20%2B%2011%20e2e-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-81%20unit%20%2B%2012%20e2e-2ea44f">
   <img alt="Read-only" src="https://img.shields.io/badge/read--only-yes-6b7280">
 </p>
 
@@ -109,6 +109,10 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 
 1. **Confirmed** — `file:line`, the verbatim quoted line, the failure scenario, the
    verifier's conclusion and confidence, and the origin. These are the ones to fix.
+   A claim may list *additional independent conclusions on the same line*: two
+   lenses can file two different claims about one line, each with its own
+   verifier. They are grouped under the first claim so the report never reads as
+   a duplicate, and they are never merged into one verdict.
 2. **Refuted** — collapsed; the verifier's counter-evidence. Do not report these as
    problems.
 3. **Unverified** — the verifier was unavailable. Not confirmed.
@@ -233,7 +237,7 @@ lib/skill.js        on-demand skill provider (rank 550)
 ### Tests
 
 ```bash
-# 80 unit tests (pure modules, a real temporary git repository, the
+# 81 unit tests (pure modules, a real temporary git repository, the
 # activation-spec contract test in test/unit/subagents.test.mjs, and the
 # prompt-shape/child-route tests)
 node --test test/unit/*.test.mjs
@@ -363,6 +367,8 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 ### 怎么读报告
 
 1. **确认项** —— `文件:行`、逐字引用的源码行、失败场景、复核结论与置信度、归属。这些才是要修的。
+   一条确认项下面可能列出**同一代码行的其他独立结论**:两个视角对同一行各报一条结论时,
+   每条都有自己的复核者,报告把它们归到第一条下面而不是并排重复,也绝不合并成一次判决。
 2. **被推翻** —— 折叠显示,附带复核者的反证。不要把这里的东西当成问题汇报。
 3. **未验证** —— 复核者不可用。不等于已确认。
 4. **覆盖 / 跳过 / 统计** —— 最诚实的一段。`✅ 已跑,无发现` 和 `⚠️ 失败` 是两回事;
@@ -473,7 +479,7 @@ lib/skill.js        按需加载的技能 provider(rank 550)
 ### 测试
 
 ```bash
-# 80 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
+# 81 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
 # + 提示词形状/子代理路由)
 node --test test/unit/*.test.mjs
 

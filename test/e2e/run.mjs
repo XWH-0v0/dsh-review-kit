@@ -198,6 +198,33 @@ await withFixture(async (cwd) => {
 })
 
 await withFixture(async (cwd) => {
+  // Two lenses, one line, two kinds: two independent claims, each verified, and
+  // the report groups them by location instead of printing a duplicate.
+  const sibling = { ...CACHE, kind: 'state', title: '缓存未命中状态没有被表达' }
+  let verifiers = 0
+  const runChild = ({ label }) => {
+    if (label.startsWith('review:find:')) {
+      const findings = label === 'review:find:correctness' ? [CACHE] : label === 'review:find:lifecycle' ? [sibling] : []
+      return Promise.resolve({ stopReason: 'completed', structured: { findings } })
+    }
+    verifiers += 1
+    return Promise.resolve({ stopReason: 'completed', structured: { confirmed: true, confidence: 0.8, reasoning: 'ok', reproduced: false, origin: 'introduced' } })
+  }
+  const result = await runReview({
+    args: { target: 'files', files: ['src/cache.js'] },
+    config,
+    runChild,
+    cwd,
+    signal: new AbortController().signal,
+  })
+  assert.equal(result.stats.confirmed, 2, '同一行的两条结论都要确认')
+  assert.equal(verifiers, 2, '两条结论各自复核，不能合并成一次判决')
+  assert.match(result.markdown, /2 条确认（1 处代码位置）/)
+  assert.match(result.markdown, /同一代码行的其他独立结论/)
+  console.log('  same-line claims stay separate and are grouped in the report')
+})
+
+await withFixture(async (cwd) => {
   const controller = new AbortController()
   controller.abort()
   const result = await runReview({
