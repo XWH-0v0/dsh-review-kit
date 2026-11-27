@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { DEFAULT_CONFIG } from '../../lib/config.js'
-import { createRunChild } from '../../lib/subagents.js'
+import { createRunChild, resolveChildRoute } from '../../lib/subagents.js'
 
 const CAPABILITIES = Object.freeze({
   agentOptions: true,
@@ -82,13 +82,20 @@ function createFakeSubagents({ parent, capabilities = CAPABILITIES, result, pend
  * @returns {Function} the child runner.
  */
 function runnerFor(service, options) {
-  return createRunChild({
-    ctx: { get: (name) => (name === 'subagents' ? service : undefined) },
-    config: { ...DEFAULT_CONFIG },
-    parentAgent: options.parentAgent,
-    cwd: options.cwd ?? 'C:/repo',
-    signal: options.signal ?? new AbortController().signal,
-  })
+  const warnings = []
+  return Object.assign(
+    createRunChild({
+      ctx: {
+        get: (name) => (name === 'subagents' ? service : undefined),
+        logger: { warn: (message) => warnings.push(message), info: () => {} },
+      },
+      config: options.config ?? { ...DEFAULT_CONFIG },
+      parentAgent: options.parentAgent,
+      cwd: options.cwd ?? 'C:/repo',
+      signal: options.signal ?? new AbortController().signal,
+    }),
+    { warnings },
+  )
 }
 
 test('startActivation 收到扁平 spec：parent/prompt/outputSchema/maxDepth 都在顶层', async () => {
@@ -233,4 +240,60 @@ test('teardown 落定后 runChild 才 settle', async () => {
   const out = await runChild({ label: 'review:find:correctness', prompt: 'x' })
   assert.equal(out.stopReason, 'completed')
   assert.equal(finished, true, 'runChild settle 时 teardown 必须已落定')
+})
+
+test('resolveChildRoute 按 role 取路由，未知 role 不覆盖', () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    finderEffort: 'low',
+    verifierEffort: 'max',
+    finderPreset: 'p-finder',
+    verifierPreset: 'p-verifier',
+    finderToolBudget: 3,
+    verifierToolBudget: 4,
+  }
+  assert.deepEqual(resolveChildRoute(config, 'finder'), { effort: 'low', preset: 'p-finder', toolBudget: 3 })
+  assert.deepEqual(resolveChildRoute(config, 'verifier'), { effort: 'max', preset: 'p-verifier', toolBudget: 4 })
+  assert.deepEqual(resolveChildRoute(config, undefined), { effort: '', preset: '', toolBudget: 0 })
+})
+
+test('finder 与 verifier 子代理各自带上自己的 effort 与 preset', async () => {
+  const parent = { id: 'parent-1' }
+  const service = createFakeSubagents({ parent })
+  const config = { ...DEFAULT_CONFIG, finderEffort: 'high', verifierEffort: 'max', finderPreset: 'review-readonly' }
+  const runChild = runnerFor(service, { parentAgent: parent, config })
+
+  await runChild({ label: 'review:find:correctness', prompt: 'x', role: 'finder' })
+  await runChild({ label: 'review:verify:abc:1', prompt: 'y', role: 'verifier' })
+
+  const finder = service.specs[0]
+  assert.deepEqual(finder.agentOptions, { reasoningEffort: 'high' }, 'finder 走 finderEffort')
+  assert.equal(finder.agentPreset, 'review-readonly', 'finder 走 finderPreset')
+
+  const verifier = service.specs[1]
+  assert.deepEqual(verifier.agentOptions, { reasoningEffort: 'max' }, '复核者保留高推理强度')
+  assert.equal('agentPreset' in verifier, false, '未配置 verifier preset 时不应发送')
+})
+
+test('provider 不支持 agentOptions 时继承父代理并只 warn 一次', async () => {
+  const parent = { id: 'parent-1' }
+  const service = createFakeSubagents({ parent, capabilities: { ...CAPABILITIES, agentOptions: false } })
+  const runChild = runnerFor(service, { parentAgent: parent })
+
+  await runChild({ label: 'review:find:correctness', prompt: 'x', role: 'finder' })
+  await runChild({ label: 'review:find:lifecycle', prompt: 'y', role: 'finder' })
+
+  assert.equal('agentOptions' in service.specs[0], false, '不支持时不应发送 agentOptions')
+  assert.equal('agentOptions' in service.specs[1], false)
+  assert.equal(runChild.warnings.length, 1, '同一个 role 只 warn 一次')
+  assert.match(runChild.warnings[0], /agentOptions/)
+})
+
+test('配置了 preset 但 provider 不支持时在启动前拒绝', () => {
+  const parent = { id: 'parent-1' }
+  const service = createFakeSubagents({ parent, capabilities: { ...CAPABILITIES, agentPreset: false } })
+  const config = { ...DEFAULT_CONFIG, finderPreset: 'review-readonly' }
+
+  assert.throws(() => runnerFor(service, { parentAgent: parent, config }), /不支持 agentPreset/)
+  assert.equal(service.specs.length, 0, '拒绝必须发生在任何子代理创建之前')
 })

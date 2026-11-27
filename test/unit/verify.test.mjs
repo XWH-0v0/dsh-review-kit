@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { createLimiter } from '../../lib/concurrency.js'
+import { resolveConfig } from '../../lib/config.js'
 import { verifyFindings } from '../../lib/verify.js'
 
 const FINDING = Object.freeze({
@@ -160,4 +161,32 @@ test('取消落在已完成的复核之后时，原因不谎称复核者不可�
   assert.equal(finding.status, 'unverified')
   assert.match(finding.refutation, /已完成 1\/3/)
   assert.doesNotMatch(finding.refutation, /复核者不可用/)
+})
+
+test('评审一次提交时，复核者被要求以该提交为准而不是工作区', async () => {
+  // A commit review looks at code the working tree may already have moved past.
+  // Without this instruction a verifier reads today's file, finds the line gone
+  // or fixed, and refutes a finding that was true for the reviewed commit.
+  const prompts = []
+  const outcome = await verifyFindings({
+    findings: [{ ...FINDING, originHint: 'new' }],
+    snapshot: SNAPSHOT,
+    root: 'C:/repo',
+    baselineRef: 'abc123^',
+    subjectRef: 'abc123',
+    config: resolveConfig({}),
+    runChild: async ({ prompt }) => {
+      prompts.push(prompt)
+      return { stopReason: 'completed', structured: { confirmed: true, confidence: 0.9, reasoning: 'ok', reproduced: false, origin: 'introduced' } }
+    },
+    limiter: createLimiter(1),
+    signal: new AbortController().signal,
+    timedOut: () => false,
+  })
+
+  assert.equal(outcome.findings[0].status, 'confirmed')
+  assert.equal(prompts.length, 1)
+  assert.match(prompts[0], /被评审的版本是提交 `abc123`/)
+  assert.match(prompts[0], /git show abc123:src\/a\.js/)
+  assert.match(prompts[0], /不足以推翻这条结论/)
 })
