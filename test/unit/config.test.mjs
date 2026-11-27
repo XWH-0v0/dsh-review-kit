@@ -24,6 +24,42 @@ test('resolveConfig rejects unknown enum values', () => {
   assert.equal(config.gitMode, 'auto')
 })
 
+test('child route defaults favour recall for finders and precision for verifiers', () => {
+  const config = resolveConfig(undefined)
+  // Finder effort stays below the verifier's: finders over-generate and the
+  // verifier is the precision gate.
+  assert.equal(config.finderEffort, 'high')
+  assert.equal(config.verifierEffort, 'max')
+  assert.equal(config.finderPreset, '')
+  assert.equal(config.verifierPreset, '')
+  assert.equal(config.finderToolBudget, 6)
+  assert.equal(config.verifierToolBudget, 5)
+  // Wall clock and fan-out rebalanced in 0.2.0 after measuring 5-23 minute runs.
+  assert.equal(config.maxFindings, 8)
+  assert.equal(config.maxCandidatesPerLens, 6)
+  assert.equal(config.maxConcurrentChildren, 8)
+  assert.equal(config.childTimeoutMs, 300_000)
+  assert.equal(config.softTimeoutMs, 900_000)
+  assert.equal(config.fullFileMaxChars, 20_000)
+})
+
+test('resolveConfig normalizes effort and preset overrides', () => {
+  const config = resolveConfig({
+    finderEffort: 'LOW',
+    verifierEffort: 'nope',
+    finderPreset: '  review-readonly  ',
+    verifierPreset: 'review-readonly',
+  })
+  assert.equal(config.finderEffort, 'low')
+  assert.equal(config.verifierEffort, 'max', '非法 effort 回落到默认值')
+  assert.equal(config.finderPreset, 'review-readonly', 'preset id 要去空白')
+  assert.equal(config.verifierPreset, 'review-readonly')
+  assert.equal(resolveConfig({ finderEffort: '' }).finderEffort, '', '空字符串表示继承父代理')
+  assert.equal(resolveConfig({ finderToolBudget: -3 }).finderToolBudget, 0)
+  assert.equal(resolveConfig({ verifierToolBudget: 999 }).verifierToolBudget, 50)
+  assert.equal(resolveConfig({ fullFileMaxChars: 1 }).fullFileMaxChars, 2_000)
+})
+
 test('normalizeLenses keeps known keys in canonical order', () => {
   assert.deepEqual(normalizeLenses(['security', 'correctness', 'nope']), ['correctness', 'security'])
   assert.deepEqual(normalizeLenses([]), ['correctness', 'lifecycle', 'contract', 'security'])

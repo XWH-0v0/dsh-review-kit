@@ -120,24 +120,80 @@ verifier reproduced it with a throwaway script outside the repo (confidence
 | Field | Default | Meaning |
 |---|---|---|
 | `subagentProvider` | `spawn` | Registered `ctx.subagents` provider |
+| `finderEffort` | `high` | Child reasoning effort for finders; `''` inherits the parent |
+| `verifierEffort` | `max` | Child reasoning effort for verifiers; `''` inherits the parent |
+| `finderPreset` | `''` | Optional `agentPreset` id for finders (`''` inherits); hard tool restriction |
+| `verifierPreset` | `''` | Optional `agentPreset` id for verifiers (`''` inherits) |
+| `finderToolBudget` | `6` | Tool calls stated in the finder prompt |
+| `verifierToolBudget` | `5` | Tool calls stated in the verifier prompt |
 | `depth` | `full` | `full` or `quick` |
 | `lenses` | `[]` | `[]` = all four (`correctness`, `lifecycle`, `contract`, `security`) |
 | `verifiersPerFinding` | `1` | 1–3; all must confirm |
-| `maxFindings` | `12` | Findings that reach verification |
-| `maxCandidatesPerLens` | `8` | Truncation only, not a failure |
+| `maxFindings` | `8` | Findings that reach verification |
+| `maxCandidatesPerLens` | `6` | Truncation only, not a failure |
 | `maxChildren` | `24` | Estimate = lenses + findings × verifiers |
-| `maxConcurrentChildren` | `6` | Shared limiter |
-| `childTimeoutMs` | `900000` | Per finder/verifier child |
-| `softTimeoutMs` | `1800000` | Whole review; on expiry children are cancelled and a partial report is returned |
+| `maxConcurrentChildren` | `8` | Shared limiter; the subagent runtime's own tree capacity defaults to 8 |
+| `childTimeoutMs` | `300000` | Per finder/verifier child |
+| `softTimeoutMs` | `900000` | Whole review; on expiry children are cancelled and a partial report is returned |
 | `onVerifierFailure` | `refute` | `refute` (fail closed) or `observation` |
 | `childMaxDepth` | `1` | `1` = children exist but cannot delegate further |
 | `maxFiles` | `40` | Changed files read per review |
 | `maxDiffChars` | `400000` | Prompt text budget |
+| `fullFileMaxChars` | `20000` | Files up to this size are quoted in full next to their diff |
 | `gitMode` | `auto` | `auto` / `tool` / `process` |
 
 `gitMode: auto` runs git through the **calling agent's shell tool**
 (`ctx.tools.execute`), so the deployment's permissions, sandbox and audit path stay
 in charge. `process` runs `git` directly, read-only plumbing only.
+
+#### Child route (0.2.0)
+
+A review's wall clock belongs to its child agents, not to this plugin. Measured on
+real runs before 0.2.0: a `quick` review with two lenses spent 790 s in the finder
+phase — one finder made **68 tool calls** (running the repository test suite twice,
+hunting for a `node` binary, listing `node_modules`) and 52 model steps at the
+parent's `max` reasoning effort, while the evidence it needed was already in its
+prompt. Reviews took 5–23 minutes.
+
+0.2.0 changes the shape of the work, not the evidence rules:
+
+- both prompts state a **tool budget** and forbid the test suite, dependency
+  installs and directory walks;
+- finders run at `finderEffort: high`; verifiers keep `max`, because the verifier
+  is the precision gate and finders are expected to over-generate;
+- every lens-independent prompt section comes first, so the four finders share one
+  cacheable prefix;
+- files larger than `fullFileMaxChars` are quoted as a diff only (the prompt says
+  how to read the rest);
+- `maxFindings` 12 → 8, `maxCandidatesPerLens` 8 → 6, `childTimeoutMs` 15 → 5 min,
+  `softTimeoutMs` 30 → 15 min.
+
+Hard tool restriction is opt-in. A prompt states the budget; only a preset can
+enforce it. Declare one in your profile and point `finderPreset` at it:
+
+```yaml
+- insert:
+    - id: preset-review-readonly
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: review-readonly
+        name: Review (read-only)
+        description: Read-only file inspection for review finders.
+        order: 40
+        plugins:
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+```
+
+`agentOptions`/`agentPreset` need a provider that declares those capabilities;
+`spawn` does. A configured preset that the provider cannot honour is a
+configuration error, raised before any child starts.
 
 The plugin is **read-only**: no workspace writes, no report files, no
 `git add/commit/stash/restore/worktree`. The only writes anywhere happen inside a
@@ -170,8 +226,9 @@ lib/skill.js        on-demand skill provider (rank 550)
 ### Tests
 
 ```bash
-# 63 unit tests (pure modules, a real temporary git repository, and the
-# activation-spec contract test in test/unit/subagents.test.mjs)
+# 74 unit tests (pure modules, a real temporary git repository, the
+# activation-spec contract test in test/unit/subagents.test.mjs, and the
+# prompt-shape/child-route tests)
 node --test test/unit/*.test.mjs
 
 # scripted end-to-end: real snapshot/gate/dedupe/verify/render path, fake children
@@ -308,23 +365,72 @@ bundle 行声明在 [`cordis.patch.yml`](cordis.patch.yml)。没有构建步骤,
 | 字段 | 默认 | 含义 |
 |---|---|---|
 | `subagentProvider` | `spawn` | 已注册的 `ctx.subagents` provider |
+| `finderEffort` | `high` | finder 子代理的推理强度;`''` = 继承父代理 |
+| `verifierEffort` | `max` | 复核子代理的推理强度;`''` = 继承父代理 |
+| `finderPreset` | `''` | finder 可选的 `agentPreset` id(`''` 继承);用于硬性限制工具 |
+| `verifierPreset` | `''` | 复核可选的 `agentPreset` id(`''` 继承) |
+| `finderToolBudget` | `6` | 写进 finder 提示词的工具调用预算 |
+| `verifierToolBudget` | `5` | 写进复核提示词的工具调用预算 |
 | `depth` | `full` | `full` 或 `quick` |
 | `lenses` | `[]` | `[]` = 全部四个(`correctness`、`lifecycle`、`contract`、`security`) |
 | `verifiersPerFinding` | `1` | 1–3;全部确认才算通过 |
-| `maxFindings` | `12` | 进入复核的条数上限 |
-| `maxCandidatesPerLens` | `8` | 只做截断,不算失败 |
+| `maxFindings` | `8` | 进入复核的条数上限 |
+| `maxCandidatesPerLens` | `6` | 只做截断,不算失败 |
 | `maxChildren` | `24` | 估算 = 视角数 + 发现数 × 复核数 |
-| `maxConcurrentChildren` | `6` | 共享并发上限 |
-| `childTimeoutMs` | `900000` | 单个 finder/verifier |
-| `softTimeoutMs` | `1800000` | 整轮评审;到期取消子代理并返回部分结果 |
+| `maxConcurrentChildren` | `8` | 共享并发上限;subagent 运行时自身的树容量默认也是 8 |
+| `childTimeoutMs` | `300000` | 单个 finder/verifier |
+| `softTimeoutMs` | `900000` | 整轮评审;到期取消子代理并返回部分结果 |
 | `onVerifierFailure` | `refute` | `refute`(宁漏不错)或 `observation` |
 | `childMaxDepth` | `1` | `1` = 子代理存在,但不能继续委派 |
 | `maxFiles` | `40` | 单次读取的改动文件上限 |
 | `maxDiffChars` | `400000` | 提示词文本预算 |
+| `fullFileMaxChars` | `20000` | 不超过这个长度的文件在 diff 之外再附全文 |
 | `gitMode` | `auto` | `auto` / `tool` / `process` |
 
 `gitMode: auto` 会让 git 走**调用方 agent 的 shell 工具**(`ctx.tools.execute`),
 从而保留部署的权限、沙箱与审计链路;`process` 直接跑 git,但只跑只读命令。
+
+#### 子代理路由(0.2.0)
+
+一次评审的耗时属于子代理,不属于这个插件。0.2.0 之前的实测:一次 `quick` 评审
+光 finder 阶段就花了 790 秒——其中一个 finder 做了 **68 次工具调用**(把仓库测试套件
+跑了两遍、满盘找 `node`、列 `node_modules`)和 52 个模型步,而它需要的证据本来就
+在提示词里。评审整体耗时 5–23 分钟。
+
+0.2.0 改的是工作形状,不是证据规则:
+
+- 两个提示词都写明**工具预算**,并禁止跑测试套件、装依赖、翻目录;
+- finder 用 `finderEffort: high`;复核保持 `max`——复核是精度闸门,finder 本来就负责多报;
+- 所有与视角无关的提示词段落放在最前面,四个 finder 共用一个可缓存的提示词前缀;
+- 超过 `fullFileMaxChars` 的文件只给 diff(提示词会说明如何读其余部分);
+- `maxFindings` 12 → 8、`maxCandidatesPerLens` 8 → 6、`childTimeoutMs` 15 → 5 分钟、
+  `softTimeoutMs` 30 → 15 分钟。
+
+硬性工具限制是可选项:提示词只写预算,**只有 preset 能真正禁用工具**。在 profile 里声明
+一个只读 preset,再把 `finderPreset` 指向它:
+
+```yaml
+- insert:
+    - id: preset-review-readonly
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: review-readonly
+        name: Review (read-only)
+        description: 只读文件查看,供 review finder 使用。
+        order: 40
+        plugins:
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+```
+
+`agentOptions`/`agentPreset` 需要 provider 声明对应能力;`spawn` 具备。若配置了 preset
+而 provider 不支持,会在任何子代理启动前直接报错。
 
 插件是**只读**的:不写工作区、不落盘报告、不执行 `git add/commit/stash/restore/worktree`。
 唯一的写操作发生在 finder/verifier 子代理为了复现问题、在它们自己的临时目录里建脚本时。
@@ -356,7 +462,8 @@ lib/skill.js        按需加载的技能 provider(rank 550)
 ### 测试
 
 ```bash
-# 63 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约)
+# 74 个单测(纯模块 + 真实临时 git 仓库 + test/unit/subagents.test.mjs 的 activation spec 契约
+# + 提示词形状/子代理路由)
 node --test test/unit/*.test.mjs
 
 # 脚本化端到端:真实 snapshot/gate/dedupe/verify/render 链路,子代理用脚本替代
